@@ -1,23 +1,43 @@
-use std::{ops::RangeInclusive, str::FromStr};
+use std::{fs::File, io::Write, ops::RangeInclusive, process::exit, str::FromStr};
 
 use cli::Generation;
+use haversine::reference_haversine;
 use rand::{rngs::SmallRng, SeedableRng};
 
 mod cli;
 
 fn main() {
     let Some(settings) = cli::run() else { return };
-    let (expected_sum, pairs): (f64, _) = generate_pairs(&settings);
-    println!("Expected sum: {expected_sum}");
+    let pairs = generate_pairs(&settings);
+    let haversine_sum: f64 = pairs
+        .iter()
+        .map(
+            |&(Coordinate { x: x0, y: y0 }, Coordinate { x: x1, y: y1 })| {
+                reference_haversine(x0, y0, x1, y1, haversine::EARTH_RADIUS)
+            },
+        )
+        .sum();
+    let haversine_average = haversine_sum / pairs.len() as f64;
+    println!("Expected sum: {haversine_average}");
 
     let json = convert_to_json(&pairs);
-    println!("{json}");
+    let mut file = match File::create("out.json") {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("couldn't create output file: {error}");
+            exit(1);
+        }
+    };
+
+    if let Err(error) = file.write_all(json.as_bytes()) {
+        eprintln!("couldn't write to output file: {error}");
+        exit(1);
+    };
 }
 
-const CLUSTER_COUNT: usize = 100;
 const CLUSTER_SIZE: f64 = 20.;
 
-fn generate_pairs(settings: &cli::Settings) -> (f64, Vec<(Coordinate, Coordinate)>) {
+fn generate_pairs(settings: &cli::Settings) -> Vec<(Coordinate, Coordinate)> {
     let mut rng = SmallRng::seed_from_u64(settings.generation_seed);
 
     let mut pairs = Vec::with_capacity(settings.requested_count);
@@ -30,8 +50,9 @@ fn generate_pairs(settings: &cli::Settings) -> (f64, Vec<(Coordinate, Coordinate
 
         Generation::Cluster => {
             let mut cluster_origin = Coordinate { x: 0., y: 0. };
+            let cluster_count = 1 + (settings.requested_count / 64);
             for i in 0..(settings.requested_count) {
-                if (i % CLUSTER_COUNT) == 0 {
+                if (i % cluster_count) == 0 {
                     cluster_origin = Coordinate::random(&mut rng);
                 }
                 pairs.push((
@@ -42,7 +63,7 @@ fn generate_pairs(settings: &cli::Settings) -> (f64, Vec<(Coordinate, Coordinate
         }
     }
 
-    (0., pairs)
+    pairs
 }
 
 /// produces JSON in this form:

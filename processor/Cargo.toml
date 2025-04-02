@@ -1,8 +1,8 @@
 [package]
-name = "generate-input"
+name = "processor"
 version = "0.1.0"
 edition = "2021"
+default-run = "processor"
 
 [dependencies]
 haversine = { path = "../haversine"}
-rand = { version = "0.9.0", features = ["small_rng"] }

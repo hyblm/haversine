@@ -18,6 +18,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 name = "generate-input"
 version = "0.1.0"
 dependencies = [
+ "haversine",
  "rand",
 ]
 
@@ -32,6 +33,10 @@ dependencies = [
  "r-efi",
  "wasi",
 ]
+
+[[package]]
+name = "haversine"
+version = "0.1.0"
 
 [[package]]
 name = "libc"
@@ -55,6 +60,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a31971752e70b8b2686d7e46ec17fb38dad4051d94024c88df49b667caea9c84"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "processor"
+version = "0.1.0"
+dependencies = [
+ "haversine",
 ]
 
 [[package]]

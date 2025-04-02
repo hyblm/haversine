@@ -13,6 +13,8 @@ pub fn run() -> Option<Settings> {
     settings
 }
 
+const MAX_PAIRS: usize = 1 << 34;
+
 pub struct Settings {
     pub generation_type: Generation,
     pub generation_seed: u64,
@@ -41,7 +43,8 @@ fn parse_settings(mut args: Args) -> Option<Settings> {
     };
 
     let generation_seed = args.next()?.parse().ok()?;
-    let requested_count = args.next()?.parse().ok()?;
+    let requested_count: usize = args.next()?.parse().ok()?;
+    let requested_count = requested_count.min(MAX_PAIRS);
 
     println!(
         "
