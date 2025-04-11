@@ -1,72 +1,78 @@
-use std::{io::Read, time::Instant};
+use std::io::Read;
 
 use haversine::reference_haversine;
-use processor::profile::{estimate_cpu_frequency, read_timer_cpu};
+use processor::profile::{self, begin_profile};
 
 fn main() {
-    let time_start = read_timer_cpu();
-
+    begin_profile();
     let Some((mut file_input, _file_answers)) = cli::run() else {
         return;
     };
-    let time_startup = read_timer_cpu();
 
-    let mut json = String::new();
-    let time_setup = read_timer_cpu();
+    let json = {
+        let _x = profile::DropTimer::start("Read Entire File");
 
-    if let Err(error) = file_input.read_to_string(&mut json) {
-        eprintln!("failed to read file with error: {error}");
-        return;
-    }
-    let time_read = read_timer_cpu();
+        let mut json = String::new();
+        if let Err(error) = file_input.read_to_string(&mut json) {
+            eprintln!("failed to read file with error: {error}");
+            return;
+        }
+        json
+    };
 
     let Some(pairs) = json_parse(&json) else {
         return;
     };
-    let time_parse = read_timer_cpu();
 
-    let haversine_sum: f64 = pairs
-        .iter()
-        .map(|&(x0, y0, x1, y1)| reference_haversine(x0, y0, x1, y1, haversine::EARTH_RADIUS))
-        .sum();
-    let haversine_average = haversine_sum / pairs.len() as f64;
-    let time_average = read_timer_cpu();
+    let haversine_average = {
+        let _x = profile::DropTimer::start("Sum Haversine Distances");
+        let haversine_sum: f64 = pairs
+            .iter()
+            .map(|&(x0, y0, x1, y1)| reference_haversine(x0, y0, x1, y1, haversine::EARTH_RADIUS))
+            .sum();
+        haversine_sum / pairs.len() as f64
+    };
 
     println!("Input size: {}", json.len());
     println!("Pair count: {}", pairs.len());
     println!("Average: {haversine_average}",);
-    let time_output = read_timer_cpu();
-    let time_end = time_output;
 
-    let duration_total = time_end - time_start;
-    let duration_startup = time_startup - time_start;
-    let duration_setup = time_setup - time_startup;
-    let duration_read = time_read - time_setup;
-    let duration_parse = time_parse - time_read;
-    let duration_average = time_average - time_parse;
-    let duration_output = time_output - time_average;
-    let percentage_startup = (100 * duration_startup) as f64 / (duration_total as f64);
-    let percentage_setup = (100 * duration_setup) as f64 / (duration_total as f64);
-    let percentage_read = (100 * duration_read) as f64 / (duration_total as f64);
-    let percentage_parse = (100 * duration_parse) as f64 / (duration_total as f64);
-    let percentage_average = (100 * duration_average) as f64 / (duration_total as f64);
-    let percentage_output = (100 * duration_output) as f64 / (duration_total as f64);
+    profile::stop_and_print_timings();
 
-    let freq = estimate_cpu_frequency(100);
+    // let time_output = read_timer_cpu();
+    // let time_end = time_output;
 
-    let d_width = 12;
-    let prec = 4;
-    let p_width = 3 + prec;
-    println!("Total time: {duration_total:>d_width$} (Cpu freq {freq})");
-    println!("   Startup: {duration_startup:>d_width$} ({percentage_startup:>p_width$.prec$} %)");
-    println!("      Read: {duration_setup:>d_width$} ({percentage_setup:>p_width$.prec$} %)");
-    println!("     Setup: {duration_read:>d_width$} ({percentage_read:>p_width$.prec$} %)");
-    println!("     Parse: {duration_parse:>d_width$} ({percentage_parse:>p_width$.prec$} %)");
-    println!("   Average: {duration_average:>d_width$} ({percentage_average:>p_width$.prec$} %)");
-    println!("    Output: {duration_output:>d_width$} ({percentage_output:>p_width$.prec$} %)");
+    // let duration_total = time_end - time_start;
+    // let duration_startup = time_startup - time_start;
+    // let duration_setup = time_setup - time_startup;
+    // let duration_read = time_read - time_setup;
+    // let duration_parse = time_parse - time_read;
+    // let duration_average = time_average - time_parse;
+    // let duration_output = time_output - time_average;
+    // let percentage_startup = (100 * duration_startup) as f64 / (duration_total as f64);
+    // let percentage_setup = (100 * duration_setup) as f64 / (duration_total as f64);
+    // let percentage_read = (100 * duration_read) as f64 / (duration_total as f64);
+    // let percentage_parse = (100 * duration_parse) as f64 / (duration_total as f64);
+    // let percentage_average = (100 * duration_average) as f64 / (duration_total as f64);
+    // let percentage_output = (100 * duration_output) as f64 / (duration_total as f64);
+
+    // let freq = estimate_cpu_frequency(100);
+
+    // let d_width = 12;
+    // let prec = 4;
+    // let p_width = 3 + prec;
+    // println!("Total time: {duration_total:>d_width$} (Cpu freq {freq})");
+    // println!("   Startup: {duration_startup:>d_width$} ({percentage_startup:>p_width$.prec$} %)");
+    // println!("      Read: {duration_setup:>d_width$} ({percentage_setup:>p_width$.prec$} %)");
+    // println!("     Setup: {duration_read:>d_width$} ({percentage_read:>p_width$.prec$} %)");
+    // println!("     Parse: {duration_parse:>d_width$} ({percentage_parse:>p_width$.prec$} %)");
+    // println!("   Average: {duration_average:>d_width$} ({percentage_average:>p_width$.prec$} %)");
+    // println!("    Output: {duration_output:>d_width$} ({percentage_output:>p_width$.prec$} %)");
 }
 
 fn json_parse(json: &str) -> Option<Vec<(f64, f64, f64, f64)>> {
+    let _x = profile::DropTimer::start("Parse Haversine Pairs");
+
     let (start, json) = json.split_once('[')?;
     let start = start.split_whitespace();
     let mut required_tokens = "{\"pairs\":".chars();
