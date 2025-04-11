@@ -5,12 +5,13 @@ use processor::profile::{self, begin_profile};
 
 fn main() {
     begin_profile();
+
     let Some((mut file_input, _file_answers)) = cli::run() else {
         return;
     };
 
     let json = {
-        let _x = profile::DropTimer::start(1, "Read Entire File");
+        let _x = profile::measure_block(1, "Read Entire File");
 
         let mut json = String::new();
         if let Err(error) = file_input.read_to_string(&mut json) {
@@ -25,7 +26,7 @@ fn main() {
     };
 
     let haversine_average = {
-        let _x = profile::DropTimer::start(2, "Sum Haversine Distances");
+        let _x = profile::measure_block(2, "Sum Haversine Distances");
         let haversine_sum: f64 = pairs
             .iter()
             .map(|&(x0, y0, x1, y1)| reference_haversine(x0, y0, x1, y1, haversine::EARTH_RADIUS))
@@ -41,7 +42,7 @@ fn main() {
 }
 
 fn json_parse(json: &str) -> Option<Vec<(f64, f64, f64, f64)>> {
-    let _x = profile::DropTimer::start(3, "Parse Haversine Pairs");
+    let _x = profile::measure_block(3, "Parse Haversine Pairs");
 
     let (start, json) = json.split_once('[')?;
     let start = start.split_whitespace();
@@ -58,7 +59,7 @@ fn json_parse(json: &str) -> Option<Vec<(f64, f64, f64, f64)>> {
 
     let mut pairs = Vec::new();
     for item in json.split('}') {
-        let _x = profile::DropTimer::start(4, "Parse Coordinate Pair");
+        let _x = profile::measure_block(4, "Parse Coordinate Pair");
         // end of the array
         if item.find(']').is_some() {
             break;
