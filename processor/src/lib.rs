@@ -4,93 +4,147 @@ pub mod profile {
         time::{Duration, Instant},
     };
 
-    const MAX_ANCHORS: usize = 10;
+    const MAX_ANCHORS: usize = 2048;
+    static mut PROFILER: Profiler = Profiler::new();
 
-    static mut START: u64 = 0;
-    static mut END: u64 = 0;
-    static mut COUNTER: usize = 0;
-    static mut TIMINGS: [ProfileAnchor; MAX_ANCHORS] = [ProfileAnchor::blank(); MAX_ANCHORS];
-
-    fn counter() -> usize {
-        unsafe { COUNTER += 1 };
-        unsafe { COUNTER }
+    struct Profiler {
+        tsc_start: u64,
+        tsc_end: u64,
+        anchors: [Anchor; MAX_ANCHORS],
+        current_anchor: usize,
     }
 
-    fn get_anchor(index: usize) -> &'static mut ProfileAnchor {
-        assert!(index < 2048);
-        unsafe { TIMINGS.get_unchecked_mut(index) }
+    impl Profiler {
+        const fn new() -> Profiler {
+            Self {
+                tsc_start: 0,
+                tsc_end: 0,
+                anchors: [Anchor::blank(); MAX_ANCHORS],
+                current_anchor: 0,
+            }
+        }
     }
 
     pub fn begin_profile() {
-        unsafe { START = read_timer_cpu() };
+        unsafe { PROFILER.tsc_start = read_timer_cpu() };
+    }
+
+    fn get_anchor(index: usize) -> &'static mut Anchor {
+        assert!(index < 2048);
+        unsafe { PROFILER.anchors.get_unchecked_mut(index) }
     }
 
     #[derive(Debug, Default, Clone, Copy)]
-    struct ProfileAnchor {
+    struct Anchor {
         hit_count: u64,
-        tsc_elapsed: u64,
         label: &'static str,
+        tsc_elapsed_inclusive: u64,
+        tsc_elapsed_exclusive: u64,
     }
 
-    impl ProfileAnchor {
-        const BLANK_LABEL: &'static str = "Unused Anchor";
+    impl Anchor {
+        const BLANK_LABEL: &'static str = "";
         const fn blank() -> Self {
             Self {
                 hit_count: 0,
-                tsc_elapsed: 0,
                 label: Self::BLANK_LABEL,
+                tsc_elapsed_inclusive: 0,
+                tsc_elapsed_exclusive: 0,
             }
         }
     }
 
     pub struct DropTimer {
+        label: &'static str,
         cpu_start: u64,
         anchor_index: usize,
+        parent_index: usize,
+        elapsed_before: u64,
     }
     impl DropTimer {
-        pub fn start(label: &'static str) -> DropTimer {
-            let cpu_start = read_timer_cpu();
+        pub fn start(id: usize, label: &'static str) -> DropTimer {
+            assert_ne!(id, 0);
 
-            let anchor_index = counter();
+            let anchor_index = id;
+            let parent_index = unsafe { PROFILER.current_anchor };
+            unsafe { PROFILER.current_anchor = anchor_index };
+
             let anchor = get_anchor(anchor_index);
-            anchor.label = label;
+            let elapsed_before = anchor.tsc_elapsed_inclusive;
 
+            let cpu_start = read_timer_cpu();
             DropTimer {
+                label,
                 cpu_start,
                 anchor_index,
+                parent_index,
+                elapsed_before,
             }
         }
     }
 
     impl Drop for DropTimer {
         fn drop(&mut self) {
+            let tsc_elapsed = read_timer_cpu() - self.cpu_start;
+            unsafe { PROFILER.current_anchor = self.parent_index };
+
+            let parent = get_anchor(self.parent_index);
             let anchor = get_anchor(self.anchor_index);
-            anchor.tsc_elapsed = read_timer_cpu() - self.cpu_start;
+
+            // NOTE (matyas): This is a hacky way of forcing the user to use unique id's for each
+            //                callsite. Ideally we could generate a unique id per callsite for them,
+            //                but that seems to be quite cumbersome to do in Rust so we're going
+            //                with this as *temporary* solution for now.
+            if anchor.label != Anchor::BLANK_LABEL {
+                assert_eq!(anchor.label, self.label);
+            } else {
+                anchor.label = self.label;
+            }
+
+            // let tsc_elapsed_exclusive = tsc_elapsed - anchor.tsc_elapsed_children;
+
+            parent.tsc_elapsed_exclusive = parent.tsc_elapsed_exclusive.wrapping_sub(tsc_elapsed);
+            anchor.tsc_elapsed_exclusive = anchor.tsc_elapsed_exclusive.wrapping_add(tsc_elapsed);
+            anchor.tsc_elapsed_inclusive = tsc_elapsed + self.elapsed_before;
             anchor.hit_count += 1;
         }
     }
 
+    const D_WIDTH: usize = 12;
+    const PREC: usize = 2;
+    const P_WIDTH: usize = 3 + PREC;
+    const L_WIDTH: usize = 24;
+
     pub fn stop_and_print_timings() {
-        unsafe { END = read_timer_cpu() };
-        let elapsed_full = unsafe { END - START };
+        unsafe { PROFILER.tsc_end = read_timer_cpu() };
+        let elapsed_full = unsafe { PROFILER.tsc_end - PROFILER.tsc_start };
         let freq = estimate_cpu_frequency(100);
 
         println!("\nTotal time: {elapsed_full} (Cpu freq {freq})\n");
 
-        let timings = unsafe { TIMINGS.iter() };
-        for anchor in timings.skip(1) {
+        let anchors = unsafe { PROFILER.anchors.iter() };
+        for anchor in anchors.skip(1) {
             if anchor.hit_count == 0 {
                 break;
             }
 
-            let d_width = 12;
-            let prec = 2;
-            let p_width = 3 + prec;
-            let percentage = (100 * anchor.tsc_elapsed) as f64 / elapsed_full as f64;
-            println!(
-                "{}  {percentage:>p_width$.prec$}%  ( {:>d_width$} )   {}",
-                anchor.hit_count, anchor.tsc_elapsed, anchor.label
+            let percent_exclusive =
+                (100 * anchor.tsc_elapsed_exclusive) as f64 / elapsed_full as f64;
+            print!(
+                "{:>5}  {:>L_WIDTH$}:  {percent_exclusive:>P_WIDTH$.PREC$}% {:>D_WIDTH$}",
+                anchor.hit_count, anchor.label, anchor.tsc_elapsed_exclusive
             );
+
+            if anchor.tsc_elapsed_exclusive != anchor.tsc_elapsed_inclusive {
+                let percent_full =
+                    (100 * anchor.tsc_elapsed_inclusive) as f64 / elapsed_full as f64;
+                println!(
+                    " > {percent_full:>P_WIDTH$.PREC$}% {:>D_WIDTH$}",
+                    anchor.tsc_elapsed_inclusive
+                );
+            } else {
+                println!();
+            }
         }
     }
 
